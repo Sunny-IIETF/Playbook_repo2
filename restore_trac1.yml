@@ -1,0 +1,89 @@
+---
+- hosts: tests
+  gather_facts: no
+
+#  vars_files:
+#    - /ansible/files/vars_restores.yml
+
+  tasks:
+  - name: Create directory in trac_env
+    file: path=/opt/trac_env/{{project_name}} state=directory
+
+#  - name: Find files from /restores to /trac_env
+
+#      paths: "/opt/restores/"
+#      patterns: "*_trac.dump"
+#    ignore_errors: True
+#    register: trac_dump_name
+
+  - name: Move all files from trac-dump to trac_env
+    shell: mv /opt/restore/*_trac.dump/* /opt/trac_env/{{project_name}}
+    ignore_errors: True
+
+  - name: Move hidden files .egg_cache
+    shell: mv /opt/restore/*_trac.dump/.egg-cache /opt/trac_env/{{project_name}}
+    ignore_errors: True
+
+  - name: Move contrib directory
+    shell: mv /opt/restore/contrib/* /opt/trac_env/{{project_name}}/contrib/
+    ignore_errors: True
+
+  - name: Change owner and group of /trac_env files
+    file: path=/opt/trac_env/{{project_name}}/ owner=apache group=apache recurse=yes
+
+  - name: Change owner and group of db files
+    file: path=/opt/trac_env/{{project_name}}/db owner=root group=root
+
+  - name: Change owner and group of .egg-cache/ files
+    file: path=/opt/trac_env/{{project_name}}/.egg-cache/ owner=apache group=apache recurse=yes
+
+  - name: Create db and user
+    su: yes
+    su_user: postgres
+    postgresql_db: name={{db_name}} state=present
+
+  - name: Create db user
+    su: yes
+    su_user: postgres
+    postgresql_user: name={{db_user}} role_attr_flags=SUPERUSER
+
+  - name: Take the name os SQL dump
+    shell: ls /opt/restore/*SQL*.dump
+    register: sql_dump
+
+  - name: Restore db
+    su: yes
+    su_user: postgres
+    shell: psql {{db_name}} < {{item}} /tee /tmp/SQL_{{project_name}}_logfile_$(date +%F).log
+    with_items: "{{sql_dump.result}}"
+
+  - name: Modifie /etc/httpd/conf/httpd.conf
+    template: src=/ansible/files/httpd.conf.j2 dest=/etc/httpd/conf/httpd.conf
+
+  - name: Modifie /etc/httpd/conf/trac.wsgi
+    template: src=/ansible/files/trac.wsgi.j2 dest=/etc/httpd/conf/trac.wsgi
+
+  - name: Restart apache
+    service: name=httpd state=restarted
+
+#  - name: Give yourself permissions to trac
+#    shell: trac-admin /opt/trac_env/{{project_name}}/  permission add {{user}} TRAC_ADMIN
+
+#  - name: Create svn repo
+#    shell: svnadmin create /opt/repo/{{project_name}}
+
+#  - name: Find all svn dump files
+#    find:
+#      paths: "/opt/restores/"
+#      patterns: "*.svndump"
+#    ignore_errors: True
+#    register: svn_dump_files
+
+#  - name: Load svn dump to the log file
+#    shell: svnadmin load /opt/repo/{{project_name}}/ </opt/restore/{{item}}| tee -а /tmp/SVN_{{project_name}}_logfile_$(date +%F).log
+#    with_items: '{{svn_dump_files.stdout}}'
+
+#- hosts:
+
+#  - name: Copy access file from original trac
+#    fetch:
